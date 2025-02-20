@@ -1,0 +1,15 @@
+// This is a single-line comment
+/*
+This is a multi-line comment
+*/
+
+_int x = 10;
+_float y = 3.14;
+_string z = "Hello, World!";
+_bool isTrue = true;
+
+void main() {
+    _int localVar = 5;
+    _output(x + y);
+    _output(z);
+}
