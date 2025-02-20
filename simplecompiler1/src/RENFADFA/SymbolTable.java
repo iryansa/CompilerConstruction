@@ -30,11 +30,13 @@ public class SymbolTable {
     private Map<String, Symbol> symbols;
     private int memoryLocationCounter;
     private String currentScope;
+    private ErrorHandler errorHandler;
 
-    public SymbolTable() {
+    public SymbolTable(ErrorHandler errorHandler) {
         this.symbols = new HashMap<>();
         this.memoryLocationCounter = 0;
         this.currentScope = "global";
+        this.errorHandler = errorHandler;
     }
 
     public void enterScope(String scopeName) {
@@ -47,9 +49,10 @@ public class SymbolTable {
 
     public void addSymbol(String name, String type) {
         if (symbols.containsKey(name)) {
-            throw new RuntimeException("Symbol '" + name + "' already defined in this scope.");
+            errorHandler.reportError("Symbol '" + name + "' already defined in this scope.", 1); // Simplified line number handling
+        } else {
+            symbols.put(name, new Symbol(name, type, currentScope, memoryLocationCounter++));
         }
-        symbols.put(name, new Symbol(name, type, currentScope, memoryLocationCounter++));
     }
 
     public Symbol getSymbol(String name) {
