@@ -1,5 +1,43 @@
 package RENFADFA;
 import java.util.*;
+import java.util.List;
+import java.util.regex.Pattern;
+class Parser {
+    private final ErrorHandler errorHandler;
+    private final SymbolTable symbolTable;
+    private final IntermediateCodeGenerator tacGenerator;
+
+    public Parser(ErrorHandler errorHandler, SymbolTable symbolTable, IntermediateCodeGenerator tacGenerator) {
+        this.errorHandler = errorHandler;
+        this.symbolTable = symbolTable;
+        this.tacGenerator = tacGenerator;
+    }
+
+    public void parse(String code, LexicalAnalyzer lexer) {
+        lexer.analyze(code, symbolTable, errorHandler);
+
+        String[] lines = code.split("\n");
+        for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+            String line = lines[lineNumber].trim();
+            if (line.isEmpty()) continue;
+
+            if (!isValidStatement(line)) {
+                errorHandler.addError(lineNumber + 1, "Invalid syntax: '" + line + "'");
+            } else {
+                tacGenerator.generate(line);  // Generate TAC if valid
+            }
+        }
+    }
+
+    private boolean isValidStatement(String line) {
+        String assignmentPattern = "^[a-z][a-zA-Z0-9_]*\\s*=\\s*\\d+;$";
+        String ifPattern = "^_if\\s+[a-z][a-zA-Z0-9_]*\\s*\\{?$";
+        String elsePattern = "^_else\\s*\\{?$";
+
+        return line.matches(assignmentPattern) || line.matches(ifPattern) || line.matches(elsePattern);
+    }
+}
+
 
 class State {
     int id;
@@ -164,10 +202,11 @@ class ErrorHandler {
 }
 
 class LexicalAnalyzer {
-    private static final Set<String> KEYWORDS = Set.of("_if", "_else", "_while", "_return");
     private static final Set<String> DATA_TYPES = Set.of("int", "string", "bool");
-    private static final String IDENTIFIER_PATTERN = "^[a-z][a-zA-Z0-9_]*$";
+    private static final String IDENTIFIER_PATTERN = "^[a-zA-Z_][a-zA-Z0-9_]*$";
     private static final String NUMBER_PATTERN = "^[0-9]+$";
+    private static final Set<String> KEYWORDS = Set.of("_if", "_else", "_while", "_return");
+    private static final Set<String> SYMBOLS = Set.of("{", "}", "=", ";", "(", ")");
     private final List<String> tokens = new ArrayList<>();
 
     void analyze(String input, SymbolTable symbolTable, ErrorHandler errorHandler) {
@@ -178,7 +217,7 @@ class LexicalAnalyzer {
         String lastKeyword = null;
         for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
             String line = lines[lineNumber].trim();
-            if (line.isEmpty()) continue; // Skip empty lines
+            if (line.isEmpty()) continue;
 
             String[] parts = line.split("\\s+");
             for (String part : parts) {
@@ -188,20 +227,27 @@ class LexicalAnalyzer {
                 } else if (DATA_TYPES.contains(part)) {
                     tokens.add("DATA TYPE: " + part);
                     lastKeyword = part;
-                } else if (part.matches(IDENTIFIER_PATTERN)) {
-                    tokens.add("IDENTIFIER: " + part);
-                    String type = (lastKeyword != null) ? lastKeyword : "Variable";
-                    symbolTable.addEntry(part, type, "global");
-                    lastKeyword = null;
-                } else if (part.matches(NUMBER_PATTERN)) {
-                    tokens.add("NUMBER: " + part);
+                } else if (SYMBOLS.contains(part)) {
+                    tokens.add("SYMBOL: " + part);
                 } else {
-                    tokens.add("UNKNOWN: " + part);
-                    errorHandler.addError(lineNumber + 1, "Unrecognized token: '" + part + "'");
+                    String cleanedPart = part.replaceAll(";$", "");
+
+                    if (cleanedPart.matches(IDENTIFIER_PATTERN)) {
+                        tokens.add("IDENTIFIER: " + cleanedPart);
+                        String type = (lastKeyword != null) ? lastKeyword : "Variable";
+                        symbolTable.addEntry(cleanedPart, type, "global");
+                        lastKeyword = null;
+                    } else if (cleanedPart.matches(NUMBER_PATTERN)) {
+                        tokens.add("NUMBER: " + cleanedPart);
+                    } else {
+                        tokens.add("UNKNOWN: " + part);
+                        errorHandler.addError(lineNumber + 1, "Unrecognized token: '" + part + "'");
+                    }
                 }
             }
         }
     }
+
 
     private String preprocess(String input) {
         input = input.toLowerCase();
@@ -217,7 +263,45 @@ class LexicalAnalyzer {
     }
 }
 
+class IntermediateCodeGenerator {
+    private final List<String> tacInstructions = new ArrayList<>();
+    private int tempVarCounter = 0;
 
+    public void generate(String statement) {
+        String[] tokens = statement.split("\\s+");
+
+        if (statement.contains("=")) {  // Assignment Statement
+            String var = tokens[0];
+            String value = tokens[2].replace(";", "");
+            String tempVar = getTempVar();
+            tacInstructions.add(tempVar + " = " + value);
+            tacInstructions.add(var + " = " + tempVar);
+        } 
+        else if (statement.startsWith("_if")) {  // If Condition
+            String conditionVar = tokens[1];
+            String label = "L" + tacInstructions.size();
+            tacInstructions.add("if " + conditionVar + " goto " + label);
+            tacInstructions.add("goto L" + (tacInstructions.size() + 1));
+            tacInstructions.add(label + ":");
+        } 
+        else if (statement.startsWith("_else")) {  // Else Condition
+            String label = "L" + tacInstructions.size();
+            tacInstructions.add("goto " + label);
+            tacInstructions.add(label + ":");
+        }
+    }
+
+    private String getTempVar() {
+        return "t" + tempVarCounter++;
+    }
+
+    public void displayTAC() {
+        System.out.println("\nIntermediate Three-Address Code (TAC):");
+        for (String instruction : tacInstructions) {
+            System.out.println(instruction);
+        }
+    }
+}
 public class CompilerPhase1 {
     public static void main(String[] args) {
         NFA nfa = new NFA();
@@ -229,17 +313,23 @@ public class CompilerPhase1 {
         SymbolTable symbolTable = new SymbolTable();
         LexicalAnalyzer lexer = new LexicalAnalyzer();
         ErrorHandler errorHandler = new ErrorHandler();
+        IntermediateCodeGenerator tacGenerator = new IntermediateCodeGenerator();
+        Parser parser = new Parser(errorHandler, symbolTable, tacGenerator);
 
         String code = """
-            int x
-            _if y _return 42 else_var
-            x = 10
+            int x;
+            _if y {
+            x = 10;
+            _else {
+            x = 20;
             """;
 
-        lexer.analyze(code, symbolTable, errorHandler);
-        lexer.displayTokens();
-        symbolTable.displayTable();
+        parser.parse(code, lexer);
         errorHandler.displayErrors();
+        tacGenerator.displayTAC();  // Display the generated TAC
     }
 }
+
+
+
 
